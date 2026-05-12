@@ -1,0 +1,203 @@
+PLAIN-TEXT EXPLANATION OF IMPLEMENTED FUNCTIONS
+================================================
+
+This document describes the function bodies that were implemented for the
+NetcarePlus-style exercise files q1 through q6. It explains what each function
+does, how the code achieves it, and why those methods were chosen. The test
+runners and mocks in each file were left unchanged; only the task functions
+were authored.
+
+-------------------------------------------------------------------------------
+Q1 — groupAndSummarizeClaims (q1-array-transformation.js)
+-------------------------------------------------------------------------------
+
+Purpose
+  Turn a flat list of claim records into a summary object keyed by claim
+  status. Each status group must report how many claims it has and the sum of
+  amountClaimed. Only statuses with strictly more than two claims appear in the
+  result.
+
+What the code does
+  First pass: walk the input array once. For each claim, use its status string
+  as a key into a temporary object (byStatus). If that key does not exist yet,
+  initialize it to { count: 0, totalAmountClaimed: 0 }. Then increment count by
+  one and add the claim's amountClaimed to totalAmountClaimed.
+
+  Second pass: iterate the entries of byStatus with Object.entries. Copy each
+  summary into the final result object only when summary.count is greater than
+  two. Return that result object.
+
+Why this approach
+  Splitting aggregation and filtering keeps each loop simple and avoids mixing
+  concerns. A plain object is a natural map from status string to summary; it
+  gives O(1) average-time lookups while grouping. The task asks for a new shape
+  derived from the input, so the implementation builds new objects and does not
+  mutate the original claims array.
+
+Alternatives considered
+  You could fold everything into a single reduce, but readability often suffers.
+  You could filter the array first then reduce, but that would require multiple
+  passes or more bookkeeping than group-then-filter.
+
+-------------------------------------------------------------------------------
+Q2 — validateClaimForm (q2-form-validation.js)
+-------------------------------------------------------------------------------
+
+Purpose
+  Validate a claim form payload and return an object whose keys are invalid
+  field names and whose values are exact error strings from the specification.
+  When multiple fields fail, every applicable error must be present at once.
+
+What the code does
+  Maintain one errors object. For each rule, if the rule fails, set the
+  corresponding property on errors.
+
+  Name and surname: require a string type and a non-empty value after trim.
+  Whitespace-only strings count as missing.
+
+  idNumber: require a string that matches exactly thirteen digits using the
+  regular expression /^\d{13}$/. Anything else (wrong length, letters) gets the
+  single specified ID error message.
+
+  serviceDate: if the value is missing (undefined, null, or empty after trim),
+  set the required message. Otherwise parse with Date and compare calendar days
+  in UTC: build a UTC midnight timestamp for the service date's year, month,
+  and day, and the same for "now". If the service day is after today in that
+  sense, set the future message. Only one serviceDate error applies at a time,
+  which matches the tests (empty string does not also get "future").
+
+  amountClaimed: require typeof number, reject NaN, and require the value to be
+  strictly greater than zero so that zero and negatives fail.
+
+Why this approach
+  Independent if-blocks over the same errors bag implement "return all errors"
+  without short-circuiting. UTC date parts align ISO date-only strings with a
+  stable definition of "today" regardless of local timezone quirks when comparing
+  calendar days. trim and typeof checks make edge cases from forms explicit.
+
+Alternatives considered
+  You could use a schema library (e.g. Zod); that would be heavier than needed
+  for a small exercise. Local midnight comparison without UTC can fail around
+  DST or timezone boundaries for date-only strings.
+
+-------------------------------------------------------------------------------
+Q3 — loadSavedProgress (q3-local-storage.js)
+-------------------------------------------------------------------------------
+
+Purpose
+  Read JSON wizard state from localStorage under the key claimProgress. Return
+  the parsed object on success, null when there is nothing useful to return, and
+  never throw.
+
+What the code does
+  Wrap the whole read in try/catch. Call getItem('claimProgress'). If the
+  result is null (missing key) or the empty string, return null without parsing.
+  Otherwise JSON.parse the string and return the value. Any thrown error from
+  getItem or parse is caught and turned into null.
+
+Why this approach
+  localStorage and JSON.parse are both failure-prone in real apps (quota,
+  private mode, corrupted data). A single try/catch satisfies the contract that
+  callers never need a try/catch of their own.
+
+Alternatives considered
+  You could validate the parsed shape; the exercise explicitly says you do not
+  need to validate the object structure.
+
+-------------------------------------------------------------------------------
+Q4 — uploadDocuments (q4-async-uploads.js)
+-------------------------------------------------------------------------------
+
+Purpose
+  Run uploadFn for every file in parallel, classify outcomes as successful or
+  failed, preserve original file order in both output arrays, and ensure the
+  exported async function does not throw or reject.
+
+What the code does
+  If files is empty, return { successful: [], failed: [] } immediately.
+
+  Otherwise call files.map((file) => uploadFn(file)) so every uploadFn call is
+  started before awaiting anything. Await Promise.allSettled on that array so
+  every promise settles whether it fulfilled or rejected.
+
+  Walk the settled results by index. For each index, the corresponding file
+  supplies fileName. fulfilled pushes { fileName, url } using the resolved
+  value's url. rejected pushes { fileName, error } using the Error's message
+  when the reason is an Error, otherwise String(reason).
+
+  An outer try/catch returns empty arrays if something unexpected throws before
+  or after allSettled (defensive; the exercise tests assume stable uploadFn).
+
+Why this approach
+  Promise.allSettled is the standard tool when you need all async work to finish
+  and you must not fail fast on the first rejection. Mapping before await starts
+  every upload in the same synchronous turn, which satisfies "parallel start."
+  Index-aligned iteration keeps successful and failed lists in the same order
+  as the input files, as required.
+
+Alternatives considered
+  Promise.all would reject on the first failure and could leave other uploads
+  hanging depending on how you structure it; it does not match the spec. A manual
+  for loop with await would serialize uploads and violate the parallel rule.
+
+-------------------------------------------------------------------------------
+Q5 — fetchClaims (q5-fetch-api.js)
+-------------------------------------------------------------------------------
+
+Purpose
+  Perform GET /claims against the configured base URL with an optional query
+  string built from a filters object. Omit undefined, null, and empty string
+  values. Throw a formatted Error on non-OK HTTP status. Return parsed JSON on
+  success.
+
+What the code does
+  Loop Object.entries(filters). Skip values that are undefined, null, or ''.
+  Push encoded key=value segments onto an array using encodeURIComponent for
+  both key and value (values are coerced with String for numbers). Join with &
+  and prefix with ? when non-empty. Concatenate BASE_URL, /claims, and the
+  query. await fetch(url). If res.ok is false, throw new Error with status and
+  statusText. Otherwise return res.json().
+
+Why this approach
+  Building the query string manually preserves JavaScript object insertion order
+  in the URL, which matters because the exercise tests compare the full URL
+  string exactly. URLSearchParams and some helpers may reorder keys and break
+  those assertions.
+
+Alternatives considered
+  URLSearchParams is fine in production if the server does not care about
+  parameter order; here manual encoding matches the tests. new URL with
+  searchParams is similar.
+
+-------------------------------------------------------------------------------
+Q6 — getDaysBetween and isWithinClaimWindow (q6-date-utils.js)
+-------------------------------------------------------------------------------
+
+Purpose
+  getDaysBetween: accept two ISO date strings and return a non-negative integer
+  count of whole days between them; order of arguments must not matter.
+  isWithinClaimWindow: return true when that day count is less than or equal
+  to windowDays (default 90), and must use getDaysBetween.
+
+What the code does
+  Define MS_PER_DAY as 1000 * 60 * 60 * 24. Parse both strings with Date, take
+  getTime, subtract, wrap with Math.abs so earlier vs later arguments do not
+  change the result, divide by MS_PER_DAY, and Math.floor to count whole days.
+
+  isWithinClaimWindow returns getDaysBetween(serviceDate, submissionDate) <=
+  windowDays.
+
+Why this approach
+  Millisecond differences are the portable way to subtract dates in JavaScript.
+  Math.abs encodes "always positive." Math.floor converts the continuous time
+  span into whole days, matching the exercise examples (same calendar day is
+  zero; adjacent calendar days is one). Delegating the window check to
+  getDaysBetween avoids duplicating date math and satisfies the spec.
+
+Alternatives considered
+  You could iterate month by month, but that is more code and easier to get
+  wrong. You could use a date library; unnecessary for this scope.
+
+-------------------------------------------------------------------------------
+End of document
+-------------------------------------------------------------------------------
